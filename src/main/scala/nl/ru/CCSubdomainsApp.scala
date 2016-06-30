@@ -13,7 +13,8 @@ object CCSubdomainsApp {
         val conf = new SparkConf().setAppName("CCSubdomainApp").setMaster("local")
         val sc = new SparkContext(conf)
 
-        val warcFilePath = "data/webarchive-20160629133656425-00000-6-5d875e632943.warc.gz"
+        // Can be comma seperated to go over multiple files
+        val warcFilePath = "hdfs:///data/public/common-crawl/crawl-data/CC-MAIN-2016-07/segments/1454701165302.57/warc/CC-MAIN-20160205193925-00246-ip-10-236-182-209.ec2.internal.warc.gz"
         val warcFile = sc.newAPIHadoopFile(
             warcFilePath,
             classOf[WarcInputFormat],
@@ -29,14 +30,16 @@ object CCSubdomainsApp {
             .map{ h => getFirstSubDomain(h.warcTargetUriStr) }
             .map( subDomain => (subDomain, 1))
             .reduceByKey((c1, c2) => c1 + c2)
-            .sortBy(_._2, false)
+            //.sortBy(_._2, false)
+
         val sizes = responseHeaders
             .map{ h => (getFirstSubDomain(h.warcTargetUriStr), h.contentLengthStr.toInt) }
             .reduceByKey((c1, c2) => c1 + c2)
-            .sortBy(_._2, false)
+            //.sortBy(_._2, false)
 
-        counts.saveAsTextFile("data/counts")
-        sizes.saveAsTextFile("data/sizes")
+
+        counts.saveAsTextFile("counts-1")
+        sizes.saveAsTextFile("sizes-1")
     }
 
     /**
