@@ -1,45 +1,55 @@
 package nl.ru
 
+import java.text.SimpleDateFormat
+import java.util.Calendar
+
+import org.jsoup.Jsoup
 import com.google.common.net.InternetDomainName
 import nl.surfsara.warcutils.WarcInputFormat
 import org.apache.hadoop.io.LongWritable
 import org.apache.spark.SparkContext
 import org.apache.spark.SparkConf
 import org.jwat.warc.{WarcReaderFactory, WarcRecord}
+import org.apache.commons.lang.StringUtils
 
 object CCSubdomainsApp {
 
+    val run_local = true
+
     def main(args: Array[String]) {
-        val conf = new SparkConf().setAppName("CCSubdomainApp").setMaster("local")
+        val conf = new SparkConf()
+            .setAppName("CCSubdomainApp")
+        if (run_local) {
+            // Simulate locally multiple threads
+            conf.setMaster("local[4]")
+        }
         val sc = new SparkContext(conf)
 
+        // Set a prefix for the output folder
+        val format = new SimpleDateFormat("y-M-d_H-m-s")
+        val output_prefix = "-" + format.format(Calendar.getInstance().getTime())
+
         // Can be comma seperated to go over multiple files
-        val warcFilePath = "hdfs:///data/public/common-crawl/crawl-data/CC-MAIN-2016-07/segments/1454701165302.57/warc/CC-MAIN-20160205193925-00246-ip-10-236-182-209.ec2.internal.warc.gz"
+        val warcFilePath = if (run_local) "data/archive.warc.gz" else "hdfs:///data/public/common-crawl/crawl-data/CC-MAIN-2016-07/segments/1454701165302.57/warc/CC-MAIN-20160205193925-00246-ip-10-236-182-209.ec2.internal.warc.gz"
         val warcFile = sc.newAPIHadoopFile(
             warcFilePath,
             classOf[WarcInputFormat],
             classOf[LongWritable],
             classOf[WarcRecord]
         )
-        val warcData = warcFile.map{ wr => wr }.cache()
-        val responseHeaders = warcData
-            .map{wr => wr._2.header}
-            .filter{_.warcTypeIdx == 2}
+
+        // Now retrieve all texts from HTML responses
+        warcFile
+            .filter{ _._2.header.warcTypeIdx == 2 /* response */ }
+            .filter{ _._2.getHttpHeader() != null /* make sure the header exists */ }
+            .filter{ _._2.getHttpHeader().contentType != null /* make sure the content type exists */ }
+            .filter{ _._2.getHttpHeader().contentType.startsWith("text/html") /* fetch only HTML pages */ }
+            .map{wr => (getFirstSubDomain(wr._2.header.warcTargetUriStr), 1)}
             .cache()
-        val counts = responseHeaders
-            .map{ h => getFirstSubDomain(h.warcTargetUriStr) }
-            .map( subDomain => (subDomain, 1))
-            .reduceByKey((c1, c2) => c1 + c2)
-            //.sortBy(_._2, false)
-
-        val sizes = responseHeaders
-            .map{ h => (getFirstSubDomain(h.warcTargetUriStr), h.contentLengthStr.toInt) }
-            .reduceByKey((c1, c2) => c1 + c2)
-            //.sortBy(_._2, false)
-
-
-        counts.saveAsTextFile("counts-1")
-        sizes.saveAsTextFile("sizes-1")
+            .reduceByKey((a, b) => a + b)
+            .sortBy(_._2, false)
+            //.saveAsTextFile("data/result" + output_prefix)
+            .foreach(println)
     }
 
     /**
@@ -61,9 +71,9 @@ object CCSubdomainsApp {
     /**
       * Remove content type parameters.
       * For example:
-      *     application/http;msgtype=response
+      * application/http;msgtype=response
       * Will become:
-      *     application/http
+      * application/http
       *
       * @param contentType The content type to remove parameters from.
       * @return The content type without parameters.
@@ -79,7 +89,7 @@ object CCSubdomainsApp {
     /**
       * Cut a string to a length of maxLength if its length is larger than maxLength.
       *
-      * @param str String to examine.
+      * @param str       String to examine.
       * @param maxLength Maximum length allowed.
       * @return Cutted string.
       */
