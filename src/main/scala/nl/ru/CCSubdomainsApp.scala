@@ -45,7 +45,7 @@ object CCSubdomainsApp {
             .filter{ _._2.getHttpHeader().contentType != null /* make sure the content type exists */ }
             .filter{ _._2.getHttpHeader().contentType.startsWith("text/html") /* fetch only HTML pages */ }
             .map{wr => (getFirstSubDomain(wr._2.header.warcTargetUriStr), 1)}
-            .cache()
+            .cache() /* Question: do you think this cache will help further processing? */
             .reduceByKey((a, b) => a + b)
             .sortBy(_._2, false)
             //.saveAsTextFile("data/result" + output_prefix)
